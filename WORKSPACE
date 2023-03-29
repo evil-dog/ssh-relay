@@ -84,6 +84,7 @@ rules_proto_toolchains()
 
 load("//:repositories.bzl", "go_repositories")
 
+# gazelle:repository_macro repositories.bzl%go_repositories
 go_repositories()
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")

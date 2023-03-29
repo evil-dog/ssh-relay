@@ -4,11 +4,11 @@ go 1.14
 
 require (
 	github.com/bazelbuild/rules_go v0.37.0 // indirect
-	github.com/bazelbuild/rules_proto v5.3.0-21.7 // indirect
+	github.com/bazelbuild/rules_proto v0.0.0-20221227155242-3f1ab99b718e // indirect
 	github.com/golang/glog v1.1.1
 	github.com/golang/protobuf v1.5.3
 	github.com/google/uuid v1.3.0
-	github.com/googleapis/googleapis v0.0.0-20230323180500-b99ef53a44c // indirect
+	github.com/googleapis/googleapis v0.0.0-20230323180535-b99ef53a44c7 // indirect
 	github.com/gorilla/websocket v1.5.0
 	github.com/hazaelsan/go-tls v1.0.0
 	github.com/jandelgado/gcov2lcov v1.0.5 // indirect

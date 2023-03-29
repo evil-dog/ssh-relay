@@ -10,6 +10,7 @@ import (
 	"github.com/hazaelsan/ssh-relay/tls"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	configpb "github.com/hazaelsan/ssh-relay/cookie-server/proto/v1/config_go_proto"
 	servicepb "github.com/hazaelsan/ssh-relay/cookie-server/proto/v1/service_go_proto"
@@ -54,7 +55,7 @@ func (r *Runner) Run() error {
   if (r.cfg.GrpcOptions.TlsConfig != nil) {
 	  conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)), grpc.WithBlock())
   } else {
-	  conn, err = grpc.Dial(addr, grpc.WithBlock())
+	  conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
   }
 	if err != nil {
 		return fmt.Errorf("grpc.Dial(%v) error: %w", addr, err)
