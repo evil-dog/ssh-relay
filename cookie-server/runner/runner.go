@@ -1,6 +1,7 @@
 package runner
 
 import (
+  ctls "crypto/tls"
 	"fmt"
 	"net"
 
@@ -37,13 +38,24 @@ type Runner struct {
 
 // Run executes the main runner loop.
 func (r *Runner) Run() error {
-	tlsCfg, err := tls.CertConfig(r.cfg.GetGrpcOptions().GetTlsConfig())
-	if err != nil {
-		return fmt.Errorf("tls.CertConfig() error: %w", err)
-	}
+  var tlsCfg (*ctls.Config)
+  var err error
+
+  if (r.cfg.GrpcOptions.TlsConfig != nil) {
+  	tlsCfg, err = tls.CertConfig(r.cfg.GetGrpcOptions().GetTlsConfig())
+	  if err != nil {
+		  return fmt.Errorf("tls.CertConfig() error: %w", err)
+  	}
+  }
 	addr := net.JoinHostPort(r.cfg.GetGrpcOptions().GetAddr(), r.cfg.GetGrpcOptions().GetPort())
 	glog.V(4).Infof("Connecting to gRPC backend %v", addr)
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)), grpc.WithBlock())
+
+  var conn *grpc.ClientConn
+  if (r.cfg.GrpcOptions.TlsConfig != nil) {
+	  conn, err = grpc.Dial(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)), grpc.WithBlock())
+  } else {
+	  conn, err = grpc.Dial(addr, grpc.WithBlock())
+  }
 	if err != nil {
 		return fmt.Errorf("grpc.Dial(%v) error: %w", addr, err)
 	}

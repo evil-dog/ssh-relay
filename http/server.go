@@ -1,6 +1,7 @@
 package http
 
 import (
+  ctls "crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -34,6 +35,9 @@ func SetHSTS(w http.ResponseWriter, d time.Duration, subdomains bool) {
 
 // NewServer generates a *Server from a proto config message.
 func NewServer(cfg *httppb.HttpServerOptions) (*Server, error) {
+  var tlsConfig *ctls.Config
+  var err error
+
 	if _, _, err := net.SplitHostPort(cfg.Addr); err == nil {
 		return nil, ErrBadAddr
 	}
@@ -43,19 +47,18 @@ func NewServer(cfg *httppb.HttpServerOptions) (*Server, error) {
 	if cfg.HttpServer == nil {
 		cfg.HttpServer = new(httppb.HttpServer)
 	}
-	if cfg.TlsConfig == nil {
-		return nil, ErrNoTLSConfig
-	}
-	if cfg.TlsConfig.CertFile == "" {
-		return nil, ErrNoCertFile
-	}
-	if cfg.TlsConfig.KeyFile == "" {
-		return nil, ErrNoKeyFile
-	}
-	tlsConfig, err := tls.Config(cfg.TlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("tls.Config() error: %w", err)
-	}
+	if cfg.TlsConfig != nil {
+  	if cfg.TlsConfig.CertFile == "" {
+	  	return nil, ErrNoCertFile
+	  }
+	  if cfg.TlsConfig.KeyFile == "" {
+		  return nil, ErrNoKeyFile
+	  }
+	  tlsConfig, err = tls.Config(cfg.TlsConfig)
+	  if err != nil {
+		  return nil, fmt.Errorf("tls.Config() error: %w", err)
+	  }
+  }
 	mux := http.NewServeMux()
 	server := &http.Server{
 		Addr:           net.JoinHostPort(cfg.Addr, cfg.Port),
@@ -98,7 +101,9 @@ type Server struct {
 func (s *Server) HandleFunc(pattern string, handler HandlerFunc) {
 	s.mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		NoCache(w)
-		SetHSTS(w, s.hstsMaxAge, s.cfg.HstsIncludeSubdomains)
+    if (s.cfg.TlsConfig != nil) {
+  		SetHSTS(w, s.hstsMaxAge, s.cfg.HstsIncludeSubdomains)
+    }
 		handler(w, r)
 	})
 	glog.V(3).Infof("Registered handler for %v", pattern)
@@ -107,5 +112,9 @@ func (s *Server) HandleFunc(pattern string, handler HandlerFunc) {
 // Run starts the HTTPS server.
 func (s *Server) Run() error {
 	glog.V(4).Infof("HTTP server listening on %v", s.server.Addr)
-	return s.server.ListenAndServeTLS(s.cfg.TlsConfig.CertFile, s.cfg.TlsConfig.KeyFile)
+  if (s.cfg.TlsConfig == nil) {
+    return s.server.ListenAndServe()
+  } else {
+  	return s.server.ListenAndServeTLS(s.cfg.TlsConfig.CertFile, s.cfg.TlsConfig.KeyFile)
+  }
 }

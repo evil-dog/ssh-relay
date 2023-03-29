@@ -5,6 +5,7 @@
 package main
 
 import (
+  ctls "crypto/tls"
 	"context"
 	"errors"
 	"flag"
@@ -64,16 +65,28 @@ type Server struct {
 
 // Run starts the Server.
 func (s *Server) Run() error {
-	tlsCfg, err := tls.CertConfig(s.cfg.GetGrpcOptions().GetTlsConfig())
-	if err != nil {
-		return fmt.Errorf("tls.CertConfig() error: %w", err)
-	}
+  var tlsCfg *ctls.Config
+  var err error
+
+  if (s.cfg.GrpcOptions.TlsConfig != nil) {
+  	tlsCfg, err = tls.CertConfig(s.cfg.GetGrpcOptions().GetTlsConfig())
+	  if err != nil {
+		  return fmt.Errorf("tls.CertConfig() error: %w", err)
+	  }
+  }
 	addr := net.JoinHostPort(s.cfg.GetGrpcOptions().GetAddr(), s.cfg.GetGrpcOptions().GetPort())
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("net.Listen(%v) error: %w", addr, err)
 	}
-	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
+
+  var srv *grpc.Server
+  if (s.cfg.GrpcOptions.TlsConfig != nil) {
+  	srv = grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsCfg)))
+  } else {
+  	srv = grpc.NewServer()
+  }
+
 	servicepb.RegisterCookieServerServer(srv, s)
 	glog.V(4).Infof("gRPC server listening on %v", addr)
 	return srv.Serve(l)
