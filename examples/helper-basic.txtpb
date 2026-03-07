@@ -1,0 +1,33 @@
+# Basic SSH Relay Helper configuration.
+#
+# The helper is used as an ssh(1) ProxyCommand.  It handles the relay
+# handshake (talking to the Cookie Server and SSH Relay on behalf of ssh),
+# then pipes the SSH session through the WebSocket connection.
+#
+# Add to ~/.ssh/config:
+#   Host *.example.com
+#     ProxyCommand ssh-relay-helper \
+#         --config=/home/myuser/.ssh/helper.txtpb \
+#         --host=%h --port=%p
+#
+# Usage:
+#   $ bazel run //helper/cmd:ssh-relay-helper -- \
+#       --config=/home/myuser/.ssh/helper.txtpb \
+#       --host=myserver.example.com --port=22
+
+# Address of the Cookie Server (port defaults to 8022 if omitted).
+cookie_server_address: "cookie-server.example.com:8022"
+
+# TLS settings for talking to the Cookie Server.
+# If ssh_relay_transport is not set, these settings are reused for the relay.
+cookie_server_transport {
+  tls_config {
+    # If the cookie server uses a private CA, specify it here.
+    # If omitted, the system root CA store is used.
+    root_ca_certs: "/home/myuser/.ssh/ca.crt"
+  }
+}
+
+# Use the corp-relay-v4 protocol (recommended).
+# Set to CORP_RELAY for legacy v1 support.
+protocol_version: CORP_RELAY_V4

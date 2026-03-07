@@ -1,0 +1,47 @@
+# Full SSH Relay Helper configuration showing all available options.
+#
+# Demonstrates:
+#   - mTLS client certificate for both Cookie Server and relay connections
+#   - Separate transport settings for the Cookie Server and the SSH Relay
+#     (useful when they use different CAs or ports)
+#
+# Add to ~/.ssh/config:
+#   Host *.example.com
+#     ProxyCommand ssh-relay-helper \
+#         --config=/home/myuser/.ssh/helper.txtpb \
+#         --host=%h --port=%p
+#
+# Usage:
+#   $ bazel run //helper/cmd:ssh-relay-helper -- \
+#       --config=/home/myuser/.ssh/helper.txtpb \
+#       --host=myserver.example.com --port=22
+
+# Address of the Cookie Server (port defaults to 8022 if omitted).
+# Can also be overridden at runtime with --cookie_server_address.
+cookie_server_address: "cookie-server.example.com:8022"
+
+# TLS settings for talking to the Cookie Server.
+# If the server requires mTLS (client_auth_type: REQUIRE_AND_VERIFY_CLIENT_CERT),
+# provide cert_file and key_file here.
+cookie_server_transport {
+  tls_config {
+    cert_file:     "/home/myuser/.ssh/client.crt"
+    key_file:      "/home/myuser/.ssh/client.key"
+    root_ca_certs: "/home/myuser/.ssh/ca.crt"
+  }
+}
+
+# TLS settings for talking to the SSH Relay.
+# If omitted, cookie_server_transport is used instead.
+# Set this when the relay uses a different CA or certificate than the
+# Cookie Server.
+ssh_relay_transport {
+  tls_config {
+    cert_file:     "/home/myuser/.ssh/client.crt"
+    key_file:      "/home/myuser/.ssh/client.key"
+    root_ca_certs: "/home/myuser/.ssh/relay-ca.crt"
+  }
+}
+
+# Use the corp-relay-v4 protocol (recommended).
+protocol_version: CORP_RELAY_V4

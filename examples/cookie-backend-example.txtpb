@@ -1,0 +1,35 @@
+# Cookie Server example backend configuration.
+#
+# The example backend is a simple gRPC server that implements the
+# CookieServer.Authorize RPC.  It does NOT perform any real authentication —
+# every request succeeds and redirects the client to ssh_relay_addr.
+# This makes it useful for development and testing only.
+#
+# The backend listens for gRPC connections from the cookie-server.
+# See cookie-server-basic.txtpb for a matching cookie-server config.
+#
+# Usage:
+#   $ bazel run //cookie-server/backend/example -- --logtostderr \
+#       --config=/etc/cookie-server/backend.txtpb
+
+# gRPC server settings.
+# addr/port must match grpc_options in the cookie-server config.
+grpc_options {
+  addr: "0.0.0.0"
+  port: "8023"
+
+  tls_config {
+    cert_file: "/etc/cookie-server/backend.crt"
+    key_file:  "/etc/cookie-server/backend.key"
+
+    # Optional: require a client cert from the cookie-server (mTLS).
+    # Must match the cert_file/key_file in grpc_options.tls_config of the
+    # cookie-server config.
+    client_ca_certs:  "/etc/cookie-server/ca.crt"
+    client_auth_type: REQUIRE_AND_VERIFY_CLIENT_CERT
+  }
+}
+
+# The relay address returned to clients after successful authorization.
+# Must match default_endpoint_address (or an endpoint_route) in the relay config.
+ssh_relay_addr: "relay.example.com:8022"

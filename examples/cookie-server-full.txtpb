@@ -1,0 +1,56 @@
+# Full Cookie Server configuration showing all available options.
+#
+# Demonstrates:
+#   - mTLS on both the HTTPS listener and the gRPC backend connection
+#   - HSTS enforcement
+#   - Cookie domain/path/lifetime tuning
+#
+# Usage:
+#   $ bazel run //cookie-server/cmd:cookie-server -- --logtostderr \
+#       --config=/etc/cookie-server/cookie-server.txtpb
+
+server_options {
+  addr: "0.0.0.0"
+  port: "8022"
+
+  tls_config {
+    cert_file: "/etc/cookie-server/server.crt"
+    key_file:  "/etc/cookie-server/server.key"
+
+    # Optional: require and validate client certificates (mTLS).
+    # Clients (e.g. ssh-relay-helper) must present a cert signed by this CA.
+    client_ca_certs:  "/etc/cookie-server/ca.crt"
+    client_auth_type: REQUIRE_AND_VERIFY_CLIENT_CERT
+  }
+
+  # Enforce HTTP Strict Transport Security.
+  hsts_max_age { seconds: 31536000 }  # 1 year
+  hsts_include_subdomains: true
+}
+
+# The origin cookie issued to authenticated clients.
+# name MUST match origin_cookie_name in the relay config.
+# max_age MUST be greater than max_session_age in the relay config.
+origin_cookie {
+  name:   "o"
+  domain: ".example.com"
+  path:   "/"
+  max_age { seconds: 86400 }  # 24 hours
+}
+
+# gRPC backend that performs the actual authorization decision.
+# This example uses mTLS: the cookie-server presents a client certificate
+# to the backend, and the backend verifies it.
+grpc_options {
+  addr: "backend.internal.example.com"
+  port: "8023"
+
+  tls_config {
+    # Verify the backend's server certificate.
+    root_ca_certs: "/etc/cookie-server/ca.crt"
+
+    # Present a client cert to the backend (mTLS).
+    cert_file: "/etc/cookie-server/backend-client.crt"
+    key_file:  "/etc/cookie-server/backend-client.key"
+  }
+}

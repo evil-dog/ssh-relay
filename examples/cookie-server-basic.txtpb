@@ -1,0 +1,46 @@
+# Basic Cookie Server configuration.
+#
+# The Cookie Server sits in front of the relay and handles /cookie requests
+# from the Chrome extension.  It authenticates the client via a pluggable
+# gRPC backend, then redirects the client to the SSH relay.
+#
+# Architecture:
+#   Chrome extension → [HTTPS] → Cookie Server → [gRPC] → Backend
+#                                                      ↓
+#                               redirect to relay.example.com:8022
+#
+# Usage:
+#   $ bazel run //cookie-server/cmd:cookie-server -- --logtostderr \
+#       --config=/etc/cookie-server/cookie-server.txtpb
+
+server_options {
+  addr: "0.0.0.0"
+  port: "8022"
+
+  tls_config {
+    cert_file: "/etc/cookie-server/server.crt"
+    key_file:  "/etc/cookie-server/server.key"
+  }
+}
+
+# The origin cookie issued to authenticated clients.
+# name MUST match origin_cookie_name in the relay config.
+# max_age MUST be greater than max_session_age in the relay config.
+origin_cookie {
+  name:   "o"
+  domain: ".example.com"
+  path:   "/"
+  max_age { seconds: 86400 }  # 24 hours
+}
+
+# gRPC backend that performs the actual authorization decision.
+# See cookie-backend-example.txtpb for a matching backend config.
+grpc_options {
+  addr: "localhost"
+  port: "8023"
+
+  tls_config {
+    # Verify the backend's certificate against this CA.
+    root_ca_certs: "/etc/cookie-server/ca.crt"
+  }
+}
