@@ -12,6 +12,25 @@ option java_outer_classname = "ConfigProto";
 option java_multiple_files = true;
 option go_package = "github.com/hazaelsan/ssh-relay/relay/proto/v1/configpb";
 
+// A routing rule for /endpoint host-based routing.
+message EndpointRoute {
+  // The relay address to return for matching SSH hosts.
+  // Format: host or host:port.
+  string relay_address = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Exact hostnames to match against the ?host= query parameter.
+  // Matched before DNS resolution.
+  repeated string hostnames = 2;
+
+  // Exact IP addresses to match.
+  repeated string ip_addresses = 3;
+
+  // CIDR subnets to match (e.g., "10.0.0.0/8", "192.168.1.0/24").
+  repeated string cidr_subnets = 4;
+
+  reserved 5 to max;
+}
+
 // Configuration settings for the SSH-over-WebSocket Relay server.
 message Config {
   // The HTTP configuration settings for the server.
@@ -49,5 +68,27 @@ message Config {
   repeated hazaelsan.ssh_relay.v1.ProtocolVersion protocol_versions = 6
       [(google.api.field_behavior) = REQUIRED];
 
-  reserved 7 to max;  // Next ID.
+  // The relay address returned by /endpoint when no routing rule matches.
+  // If empty, derived from server_options (addr:port). This allows /endpoint
+  // to work with zero configuration.
+  string default_endpoint_address = 7;
+
+  // Optional host-based routing rules for /endpoint.
+  // Rules are evaluated in order; the first match wins. If no rule matches,
+  // default_endpoint_address is returned.
+  repeated EndpointRoute endpoint_routes = 8;
+
+  // How long to cache DNS lookups for /endpoint host routing.
+  // Defaults to 60s. Set to 0 to disable caching.
+  google.protobuf.Duration dns_cache_ttl = 9;
+
+  // Per-session send buffer size for /v4/reconnect support (bytes).
+  // Defaults to 131072 (128 KiB). Set to 0 to disable reconnect support.
+  int32 reconnect_buffer_size = 10;
+
+  // How long to wait for a client to reconnect after an unclean disconnect.
+  // Defaults to 30s. Set to 0 to disable reconnect support.
+  google.protobuf.Duration reconnect_wait_timeout = 11;
+
+  reserved 12 to max;  // Next ID.
 }

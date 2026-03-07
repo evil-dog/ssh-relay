@@ -31,11 +31,23 @@ func New(cfg *configpb.Config) (*Runner, error) {
 	if err := duration.FromProto(&maxAge, cfg.MaxSessionAge); err != nil {
 		return nil, fmt.Errorf("duration.FromProto(%v) error = %w", cfg.MaxSessionAge, err)
 	}
-	r := &Runner{
-		cfg:    cfg,
-		mgr:    manager.New(int(cfg.MaxSessions), maxAge),
-		server: s,
+	var reconnectWait time.Duration
+	if err := duration.FromProto(&reconnectWait, cfg.ReconnectWaitTimeout); err != nil {
+		return nil, fmt.Errorf("duration.FromProto(%v) error = %w", cfg.ReconnectWaitTimeout, err)
 	}
+	epRouter, err := newEndpointRouter(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("newEndpointRouter() error = %w", err)
+	}
+	r := &Runner{
+		cfg:      cfg,
+		mgr:      manager.New(int(cfg.MaxSessions), maxAge, int(cfg.ReconnectBufferSize), reconnectWait),
+		server:   s,
+		epRouter: epRouter,
+	}
+
+	// /endpoint is registered unconditionally — it's the discovery layer.
+	s.HandleFunc("/endpoint", r.endpointHandle)
 
 	if protocolEnabled(cfg, protocolversionpb.ProtocolVersion_CORP_RELAY) {
 		s.HandleFunc("/connect", r.connectHandle)
@@ -43,6 +55,7 @@ func New(cfg *configpb.Config) (*Runner, error) {
 	}
 	if protocolEnabled(cfg, protocolversionpb.ProtocolVersion_CORP_RELAY_V4) {
 		s.HandleFunc("/v4/connect", r.connectHandleV4)
+		s.HandleFunc("/v4/reconnect", r.reconnectHandleV4)
 	}
 
 	return r, nil
@@ -50,9 +63,10 @@ func New(cfg *configpb.Config) (*Runner, error) {
 
 // Runner is the main SSH-over-WebSocket Relay connection handler.
 type Runner struct {
-	cfg    *configpb.Config
-	mgr    *manager.Manager
-	server *http.Server
+	cfg      *configpb.Config
+	mgr      *manager.Manager
+	server   *http.Server
+	epRouter *endpointRouter
 }
 
 // Run executes the runner, listens for incoming client connections.
