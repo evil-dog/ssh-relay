@@ -83,12 +83,14 @@ dns_cache_ttl { seconds: 60 }
 # Enables session resumption after unclean WebSocket disconnects.
 # The Chrome extension will attempt up to 3 reconnects, 2 seconds apart.
 #
-# Both fields must be non-zero to enable reconnect support.
+# Both fields default to sensible values; shown here for explicitness.
+# To disable reconnect support, set: reconnect_wait_timeout { seconds: 0 }
 
 # Per-session retransmit buffer (bytes).  If SSH produces more data than
 # this while the client is disconnected, the session is terminated rather
-# than silently corrupted.
-reconnect_buffer_size: 131072  # 128 KiB
+# than silently corrupted.  Default: 131072 (128 KiB).
+reconnect_buffer_size: 131072
 
 # How long to keep a session alive waiting for the client to reconnect.
+# Default: 30s.
 reconnect_wait_timeout { seconds: 30 }

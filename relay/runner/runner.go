@@ -32,8 +32,14 @@ func New(cfg *configpb.Config) (*Runner, error) {
 		return nil, fmt.Errorf("duration.FromProto(%v) error = %w", cfg.MaxSessionAge, err)
 	}
 	var reconnectWait time.Duration
-	if err := duration.FromProto(&reconnectWait, cfg.ReconnectWaitTimeout); err != nil {
+	if cfg.ReconnectWaitTimeout == nil {
+		reconnectWait = 30 * time.Second
+	} else if err := duration.FromProto(&reconnectWait, cfg.ReconnectWaitTimeout); err != nil {
 		return nil, fmt.Errorf("duration.FromProto(%v) error = %w", cfg.ReconnectWaitTimeout, err)
+	}
+	reconnectBufSize := int(cfg.ReconnectBufferSize)
+	if reconnectBufSize == 0 {
+		reconnectBufSize = 131072
 	}
 	epRouter, err := newEndpointRouter(cfg)
 	if err != nil {
@@ -41,7 +47,7 @@ func New(cfg *configpb.Config) (*Runner, error) {
 	}
 	r := &Runner{
 		cfg:      cfg,
-		mgr:      manager.New(int(cfg.MaxSessions), maxAge, int(cfg.ReconnectBufferSize), reconnectWait),
+		mgr:      manager.New(int(cfg.MaxSessions), maxAge, reconnectBufSize, reconnectWait),
 		server:   s,
 		epRouter: epRouter,
 	}

@@ -83,11 +83,11 @@ message Config {
   google.protobuf.Duration dns_cache_ttl = 9;
 
   // Per-session send buffer size for /v4/reconnect support (bytes).
-  // Defaults to 131072 (128 KiB). Set to 0 to disable reconnect support.
+  // Defaults to 131072 (128 KiB).
   int32 reconnect_buffer_size = 10;
 
   // How long to wait for a client to reconnect after an unclean disconnect.
-  // Defaults to 30s. Set to 0 to disable reconnect support.
+  // Defaults to 30s. Set to {seconds: 0} to disable reconnect support.
   google.protobuf.Duration reconnect_wait_timeout = 11;
 
   reserved 12 to max;  // Next ID.
