@@ -1,0 +1,38 @@
+# Basic SSH Relay configuration.
+#
+# Runs an SSH-over-WebSocket relay on port 8022 with TLS and the
+# corp-relay-v4 protocol.  All sessions expire after 8 hours.
+#
+# Usage:
+#   $ bazel run //relay/cmd:ssh_relay -- --logtostderr \
+#       --config=/etc/ssh-relay/ssh-relay.txtpb
+
+server_options {
+  # Listen address; defaults to 0.0.0.0 (all interfaces) if omitted.
+  addr: "0.0.0.0"
+  port: "8022"
+
+  tls_config {
+    cert_file: "/etc/ssh-relay/server.crt"
+    key_file:  "/etc/ssh-relay/server.key"
+  }
+}
+
+client_options {
+  # Timeout when dialing the backend SSH server.
+  dial_timeout { seconds: 5 }
+}
+
+# REQUIRED: sessions are terminated immediately if this is omitted.
+max_session_age { seconds: 28800 }  # 8 hours
+
+# Must match the origin_cookie.name set in the Cookie Server.
+origin_cookie_name: "o"
+
+# Enable the corp-relay-v4 protocol (also supports CORP_RELAY for v1).
+protocol_versions: CORP_RELAY_V4
+
+# The address this relay reports for itself via /endpoint.
+# Clients use this to know where to send /v4/connect requests.
+# Must be set if addr above is 0.0.0.0.
+default_endpoint_address: "relay.example.com:8022"

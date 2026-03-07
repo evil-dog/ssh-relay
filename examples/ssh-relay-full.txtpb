@@ -1,0 +1,94 @@
+# Full SSH Relay configuration showing all available options.
+#
+# Demonstrates:
+#   - Both relay protocol versions
+#   - Session reconnect support (/v4/reconnect)
+#   - /endpoint host-based routing
+#   - mTLS client certificate enforcement
+#
+# Usage:
+#   $ bazel run //relay/cmd:ssh_relay -- --logtostderr \
+#       --config=/etc/ssh-relay/ssh-relay.txtpb
+
+server_options {
+  addr: "0.0.0.0"
+  port: "8022"
+
+  tls_config {
+    cert_file: "/etc/ssh-relay/server.crt"
+    key_file:  "/etc/ssh-relay/server.key"
+
+    # Optional: require and validate client certificates.
+    client_ca_certs:    "/etc/ssh-relay/ca.crt"
+    client_auth_type:   REQUIRE_AND_VERIFY_CLIENT_CERT
+  }
+
+  # Enforce HTTP Strict Transport Security.
+  hsts_max_age { seconds: 31536000 }  # 1 year
+  hsts_include_subdomains: true
+}
+
+client_options {
+  dial_timeout { seconds: 5 }
+}
+
+# Maximum session age.
+# REQUIRED: if omitted, sessions are terminated immediately (time.After(0)).
+max_session_age { seconds: 28800 }  # 8 hours
+
+max_sessions: 500  # 0 = unlimited
+
+origin_cookie_name: "o"
+
+# Enable both relay protocol versions.
+protocol_versions: CORP_RELAY
+protocol_versions: CORP_RELAY_V4
+
+# ---- /endpoint routing -----------------------------------------------
+#
+# /endpoint?host=SSH_HOST is the first call the Chrome extension makes.
+# It returns the relay address the client should use for all subsequent
+# requests (/cookie, /v4/connect, etc.).
+#
+# Rules are evaluated in order; the first match wins.
+# If no rule matches, default_endpoint_address is returned.
+
+default_endpoint_address: "relay.example.com:8022"
+
+# Route corp hosts to a dedicated internal relay.
+endpoint_routes {
+  relay_address: "relay-corp.example.com:8022"
+  hostnames: "bastion.corp.example.com"
+  hostnames: "jumphost.corp.example.com"
+}
+
+# Route the entire 10.0.0.0/8 range to an on-prem relay.
+endpoint_routes {
+  relay_address: "relay-onprem.example.com:8022"
+  cidr_subnets: "10.0.0.0/8"
+}
+
+# Route a specific IP to a regional relay.
+endpoint_routes {
+  relay_address: "relay-us-west.example.com:8022"
+  ip_addresses: "203.0.113.42"
+}
+
+# Cache DNS lookups used for /endpoint host routing.
+# Set to 0 to disable caching.
+dns_cache_ttl { seconds: 60 }
+
+# ---- /v4/reconnect ---------------------------------------------------
+#
+# Enables session resumption after unclean WebSocket disconnects.
+# The Chrome extension will attempt up to 3 reconnects, 2 seconds apart.
+#
+# Both fields must be non-zero to enable reconnect support.
+
+# Per-session retransmit buffer (bytes).  If SSH produces more data than
+# this while the client is disconnected, the session is terminated rather
+# than silently corrupted.
+reconnect_buffer_size: 131072  # 128 KiB
+
+# How long to keep a session alive waiting for the client to reconnect.
+reconnect_wait_timeout { seconds: 30 }
