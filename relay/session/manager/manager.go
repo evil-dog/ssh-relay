@@ -22,22 +22,28 @@ var (
 	ErrSessionLimit = errors.New("session limit reached")
 )
 
-// New instantiates a *Manager with a limit of sessions and individual session age.
-func New(maxSessions int, maxAge time.Duration) *Manager {
+// New instantiates a *Manager with a limit of sessions, individual session age,
+// and optional reconnect configuration for corp-relay-v4 sessions.
+// reconnectBufSize and reconnectWait both must be non-zero to enable reconnect support.
+func New(maxSessions int, maxAge time.Duration, reconnectBufSize int, reconnectWait time.Duration) *Manager {
 	return &Manager{
-		maxSessions: maxSessions,
-		maxAge:      maxAge,
-		sessions:    make(map[uuid.UUID]session.Session),
+		maxSessions:      maxSessions,
+		maxAge:           maxAge,
+		sessions:         make(map[uuid.UUID]session.Session),
+		reconnectBufSize: reconnectBufSize,
+		reconnectWait:    reconnectWait,
 	}
 }
 
 // Manager is an SSH-over-WebSocket Session manager.
 // It enforces a session limit as well as individual session lifetimes.
 type Manager struct {
-	maxAge      time.Duration
-	maxSessions int
-	sessions    map[uuid.UUID]session.Session
-	mu          sync.RWMutex
+	maxAge           time.Duration
+	maxSessions      int
+	sessions         map[uuid.UUID]session.Session
+	mu               sync.RWMutex
+	reconnectBufSize int
+	reconnectWait    time.Duration
 }
 
 // New creates and registers a Session from an SSH connection.
@@ -52,7 +58,11 @@ func (m *Manager) New(ssh net.Conn, v session.ProtocolVersion) (session.Session,
 	case session.CorpRelay:
 		s = corprelay.New(ssh)
 	case session.CorpRelayV4:
-		s = corprelayv4.New(ssh, session.Server)
+		sv4 := corprelayv4.New(ssh, session.Server)
+		if m.reconnectBufSize > 0 && m.reconnectWait > 0 {
+			sv4.SetReconnectConfig(m.reconnectBufSize, m.reconnectWait)
+		}
+		s = sv4
 	default:
 		return nil, session.ErrBadProtocolVersion
 	}

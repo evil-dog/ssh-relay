@@ -58,7 +58,7 @@ func newRunner() *Runner {
 		cfg: &configpb.Config{
 			OriginCookieName: "origin",
 		},
-		mgr: manager.New(1, maxAge),
+		mgr: manager.New(1, maxAge, 0, 0),
 	}
 }
 
