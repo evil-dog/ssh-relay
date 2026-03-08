@@ -65,12 +65,17 @@ type Session struct {
 	done   chan struct{}
 
 	// Reconnect support (zero value = disabled).
-	sendBuf        []byte          // unACKed data sent to client, for retransmission
+	sendBuf        []byte          // unACKed data sent to peer, for retransmission
 	sendBufCap     int             // max send buffer capacity (0 = no reconnect)
-	serverWritePos uint64          // total bytes written to client
+	serverWritePos uint64          // total bytes written to peer
 	buffering      bool            // true when in reconnect-wait mode
-	reconnectCh    chan *reconnectReq
-	reconnectWait  time.Duration
+
+	// Server-side reconnect: waits for an inbound reconnect HTTP request.
+	reconnectCh   chan *reconnectReq
+	reconnectWait time.Duration
+
+	// Client-side reconnect: proactively dials /v4/reconnect after unclean disconnect.
+	reconnectDialer func(sid string, ack uint64) (*websocket.Conn, error)
 }
 
 func (s *Session) String() string {
@@ -87,14 +92,27 @@ func (s *Session) Version() session.ProtocolVersion {
 	return session.CorpRelayV4
 }
 
-// SetReconnectConfig enables reconnect support with the given send buffer size and wait timeout.
-// Must be called before Run().
+// SetReconnectConfig enables server-side reconnect support with the given send buffer size and wait timeout.
+// Must be called before Run(). Only effective when role == Server.
 func (s *Session) SetReconnectConfig(bufSize int, wait time.Duration) {
 	s.sendBufCap = bufSize
 	s.reconnectWait = wait
 	if bufSize > 0 && wait > 0 {
 		s.sendBuf = make([]byte, 0, bufSize)
 		s.reconnectCh = make(chan *reconnectReq, 1)
+	}
+}
+
+// SetClientReconnectConfig enables client-side reconnect support.
+// bufSize is the per-session send buffer capacity in bytes.
+// dialer is called to establish a new WebSocket after an unclean disconnect;
+// it receives the session ID and the client's current read count (ack).
+// Must be called before Run(). Only effective when role == Client.
+func (s *Session) SetClientReconnectConfig(bufSize int, dialer func(sid string, ack uint64) (*websocket.Conn, error)) {
+	s.sendBufCap = bufSize
+	s.reconnectDialer = dialer
+	if bufSize > 0 && dialer != nil {
+		s.sendBuf = make([]byte, 0, bufSize)
 	}
 }
 
@@ -162,37 +180,45 @@ func (s *Session) mainLoop(sshErrc <-chan error) error {
 			return err
 
 		case wsErr := <-wsErrc:
-			if !isUncleanClose(wsErr) || s.reconnectCh == nil {
+			canReconnect := isUncleanClose(wsErr) && (s.reconnectCh != nil || s.reconnectDialer != nil)
+			if !canReconnect {
 				if currentReq != nil {
 					currentReq.done <- wsErr
 				}
 				return wsErr
 			}
-			// Unclean disconnect — enter reconnect-wait.
+			// Unclean disconnect — enter buffering mode.
 			s.enterBufferingMode()
-			if currentReq != nil {
-				currentReq.done <- nil
-				currentReq = nil
-			}
 
-			timer := time.NewTimer(s.reconnectWait)
-			var newReq *reconnectReq
-			select {
-			case err := <-sshErrc:
-				timer.Stop()
-				return err
-			case req := <-s.reconnectCh:
-				timer.Stop()
-				newReq = req
-			case <-timer.C:
-				return fmt.Errorf("%v: reconnect timeout after %v", s, s.reconnectWait)
+			if s.reconnectCh != nil {
+				// Server path: wait for an inbound /v4/reconnect request.
+				if currentReq != nil {
+					currentReq.done <- nil
+					currentReq = nil
+				}
+				timer := time.NewTimer(s.reconnectWait)
+				var newReq *reconnectReq
+				select {
+				case err := <-sshErrc:
+					timer.Stop()
+					return err
+				case req := <-s.reconnectCh:
+					timer.Stop()
+					newReq = req
+				case <-timer.C:
+					return fmt.Errorf("%v: reconnect timeout after %v", s, s.reconnectWait)
+				}
+				if err := s.doReconnect(newReq); err != nil {
+					newReq.done <- err
+					return err
+				}
+				currentReq = newReq
+			} else {
+				// Client path: proactively dial /v4/reconnect.
+				if err := s.doClientReconnect(sshErrc); err != nil {
+					return err
+				}
 			}
-
-			if err := s.doReconnect(newReq); err != nil {
-				newReq.done <- err
-				return err
-			}
-			currentReq = newReq
 			// Loop back to start runWS on the new WebSocket.
 		}
 	}
@@ -241,6 +267,113 @@ func (s *Session) doReconnect(req *reconnectReq) error {
 	s.wFunc = req.ws.NextWriter
 	s.mu.Unlock()
 
+	return nil
+}
+
+// doClientReconnect performs client-side reconnect with retries.
+// It calls reconnectDialer to get a new WebSocket, reads RECONNECT_SUCCESS,
+// retransmits any buffered data the server hasn't received, then resumes normal operation.
+func (s *Session) doClientReconnect(sshErrc <-chan error) error {
+	const (
+		maxAttempts = 3
+		retryDelay  = 2 * time.Second
+	)
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			timer := time.NewTimer(retryDelay)
+			select {
+			case err := <-sshErrc:
+				timer.Stop()
+				return err
+			case <-timer.C:
+			}
+		}
+
+		s.mu.RLock()
+		rCount := s.rCount
+		s.mu.RUnlock()
+
+		glog.V(2).Infof("%v: client reconnect attempt %d/%d (ack=%d)", s, attempt, maxAttempts, rCount)
+		ws, err := s.reconnectDialer(s.sid.String(), rCount)
+		if err != nil {
+			lastErr = fmt.Errorf("dial: %w", err)
+			glog.Warningf("%v: reconnect attempt %d/%d: %v", s, attempt, maxAttempts, lastErr)
+			continue
+		}
+
+		serverAck, err := s.readReconnectSuccess(ws)
+		if err != nil {
+			ws.Close()
+			lastErr = fmt.Errorf("RECONNECT_SUCCESS: %w", err)
+			glog.Warningf("%v: reconnect attempt %d/%d: %v", s, attempt, maxAttempts, lastErr)
+			continue
+		}
+
+		if err := s.applyClientReconnect(ws, serverAck); err != nil {
+			ws.Close()
+			lastErr = err
+			glog.Warningf("%v: reconnect attempt %d/%d: %v", s, attempt, maxAttempts, lastErr)
+			continue
+		}
+
+		glog.V(2).Infof("%v: reconnected successfully", s)
+		return nil
+	}
+	return fmt.Errorf("%v: client reconnect failed after %d attempts: %w", s, maxAttempts, lastErr)
+}
+
+// readReconnectSuccess reads a RECONNECT_SUCCESS frame synchronously from ws.
+// Returns the server's read count (bytes server has received from client).
+// Called before runWS starts on the reconnect WebSocket.
+func (s *Session) readReconnectSuccess(ws *websocket.Conn) (uint64, error) {
+	t, r, err := ws.NextReader()
+	if err != nil {
+		return 0, fmt.Errorf("NextReader() error: %w", err)
+	}
+	if t != websocket.BinaryMessage {
+		return 0, fmt.Errorf("expected binary message, got %v", t)
+	}
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(r); err != nil {
+		return 0, err
+	}
+	c, err := command.Unmarshal(buf.Bytes())
+	if err != nil {
+		return 0, fmt.Errorf("Unmarshal() error: %w", err)
+	}
+	rs, ok := c.(command.ReconnectSuccess)
+	if !ok {
+		return 0, fmt.Errorf("expected RECONNECT_SUCCESS, got tag %v", c.Tag())
+	}
+	return rs.Ack(), nil
+}
+
+// applyClientReconnect trims the send buffer based on serverAck, retransmits
+// buffered data, and resumes normal writes on the new WebSocket.
+func (s *Session) applyClientReconnect(ws *websocket.Conn, serverAck uint64) error {
+	// Trim sendBuf: server confirmed receiving up to serverAck bytes.
+	s.mu.Lock()
+	if serverAck > s.wCount {
+		trim := int(serverAck - s.wCount)
+		if trim <= len(s.sendBuf) {
+			s.sendBuf = s.sendBuf[trim:]
+		}
+		s.wCount = serverAck
+	}
+	s.mu.Unlock()
+
+	// Retransmit any buffered data the server hasn't received yet.
+	if err := s.retransmitAll(ws); err != nil {
+		return fmt.Errorf("retransmit: %w", err)
+	}
+
+	// Switch to the new WebSocket.
+	s.mu.Lock()
+	s.buffering = false
+	s.ws = ws
+	s.wFunc = ws.NextWriter
+	s.mu.Unlock()
 	return nil
 }
 
@@ -351,7 +484,9 @@ func (s *Session) recvCmd(b []byte) error {
 		}
 		return nil
 	case command.TagReconnectSuccess:
-		return errors.New("not implemented")
+		// RECONNECT_SUCCESS is read synchronously by doClientReconnect before runWS starts.
+		// It should never arrive during normal WebSocket operation.
+		return errors.New("unexpected RECONNECT_SUCCESS outside reconnect handshake")
 	case command.TagData:
 		if err := s.readData(c.(command.Data)); err != nil {
 			return err

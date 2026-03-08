@@ -210,6 +210,11 @@ func (rs ReconnectSuccess) Write(w io.Writer) error {
 	return binWrite(w, rs.Tag(), rs)
 }
 
+// Ack returns the ack value (server's read count).
+func (rs ReconnectSuccess) Ack() uint64 {
+	return uint64(rs)
+}
+
 // NewData creates a DATA command with the given payload.
 func NewData(b []byte) (Data, error) {
 	d := Data(b)
